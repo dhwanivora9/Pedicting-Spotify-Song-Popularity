@@ -1,0 +1,333 @@
+---
+title: "Predicting Spotify Song Genre"
+author: "Dhwani & Shrey"
+date: "4/3/2020"
+output: html_document
+---
+## {.tabset}
+
+### Introduction
+The data used in this project is from Spotify which is also available in spotify package. The infromation on the dataset can be found [here](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-01-21/readme.md).The dataset here consists of various audio features of a song like acousticness, liveness, speechiness, instrumentalness, energy, loudness, danceability, valence (positiveness), duration, tempo, key, and mode along with popularity of the song.
+
+We intend to predict popularity of the song based on its avaialable audio features using machine learning technique by building a classification model.
+
+This analysis could help various musicians and artists to get a broad understanding on what kind of audio features should they be including in their song to make it popular. Not only artist and musicians the model will also help various online song streaming services to decided what kind of songs to add in their database in order to have more popular songs in their bucket
+
+
+### Packages Required
+Following packages are required to import, analyze, view and manipulate data:
+```{r}
+library(readr)
+library(tidyverse)
+library(knitr)
+library(dplyr)
+library(psych)
+library(ggplot2)
+library(cowplot)
+library(psych)
+library(ROCR)
+library(rpart)
+library(rpart.plot)
+
+```
+
+Following packages are used to run classification models: 
+```{r}
+library(rpart)
+library(rpart.plot)
+```
+
+### Data Preparation
+The dataset used in this analysis can be found [here](https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-01-21/spotify_songs.csv). Witht the below code we have performed two prime activities of reading and previewing data
+
+```{r}
+spotify=read.csv('spotify_songs.csv', stringsAsFactors = FALSE)
+head(spotify)
+```
+
+In this section we are trying to explain each auido features which we will be using in our further model building and analysis
+```{r}
+var_desc<-c("Song unique ID","Song Name","Song Artist","Song Popularity (0-100) where higher is better","Album unique ID","Song album name","Date when album released","Name of playlist","Playlist ID","Playlist genre","Playlist subgenre","Danceability describes how suitable a track is for dancing based on a combination of musical elements including tempo, rhythm stability, beat strength, and overall regularity. A value of 0.0 is least danceable and 1.0 is most danceable.","Energy is a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity. Typically, energetic tracks feel fast, loud, and noisy. For example, death metal has high energy, while a Bach prelude scores low on the scale. Perceptual features contributing to this attribute include dynamic range, perceived loudness, timbre, onset rate, and general entropy.","The estimated overall key of the track. Integers map to pitches using standard Pitch Class notation . E.g. 0 = C, 1 = C?/D?, 2 = D, and so on. If no key was detected, the value is -1.","The overall loudness of a track in decibels (dB). Loudness values are averaged across the entire track and are useful for comparing relative loudness of tracks. Loudness is the quality of a sound that is the primary psychological correlate of physical strength (amplitude). Values typical range between -60 and 0 db.","Mode indicates the modality (major or minor) of a track, the type of scale from which its melodic content is derived. Major is represented by 1 and minor is 0.","Speechiness detects the presence of spoken words in a track. The more exclusively speech-like the recording (e.g. talk show, audio book, poetry), the closer to 1.0 the attribute value. Values above 0.66 describe tracks that are probably made entirely of spoken words. Values between 0.33 and 0.66 describe tracks that may contain both music and speech, either in sections or layered, including such cases as rap music. Values below 0.33 most likely represent music and other non-speech-like tracks.","A confidence measure from 0.0 to 1.0 of whether the track is acoustic. 1.0 represents high confidence the track is acoustic.","Predicts whether a track contains no vocals. “Ooh” and “aah” sounds are treated as instrumental in this context. Rap or spoken word tracks are clearly “vocal”. The closer the instrumentalness value is to 1.0, the greater likelihood the track contains no vocal content. Values above 0.5 are intended to represent instrumental tracks, but confidence is higher as the value approaches 1.0.","Detects the presence of an audience in the recording. Higher liveness values represent an increased probability that the track was performed live. A value above 0.8 provides strong likelihood that the track is live.","A measure from 0.0 to 1.0 describing the musical positiveness conveyed by a track. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more negative (e.g. sad, depressed, angry).","The overall estimated tempo of a track in beats per minute (BPM). In musical terminology, tempo is the speed or pace of a given piece and derives directly from the average beat duration.","Duration of song in milliseconds")
+spotify.type<-lapply(spotify,class)
+var_names<-colnames(spotify)
+data.desc<-as_tibble(cbind(var_names,spotify.type,var_desc))
+kable(data.desc)
+```
+
+Here in this section we have added a new colum called tarck_year which is basically derived form the track_album_release_date. Apart from this we dont intend to drop any columns from our dataset as all of them are required and visualized in our further process. 
+```{r}
+spotify<-spotify %>% mutate(track_year=substr(spotify$track_album_release_date, 1, 4))
+spotify$track_year <- as.numeric(spotify$track_year)
+head(spotify)
+```
+
+This peice of code allows us to see the the overall size of our dataset by providing information of number of rows and column
+```{r}
+dim(spotify)
+```
+
+
+Here in this peice we are trying to understand various types of variables and their classes by using str() function.
+```{r}
+str(spotify)
+```
+
+
+In this part we have a quick look at the various columns and analyse the values within each of the column by calculating the min and max for numeric and integer type columns and length for character type column
+```{r}
+summary(spotify)
+```
+
+
+From the below set of codes we have witnessed that there are no duplicate rows present in the dataset and 0.02% of missing values which we currently keep it as it is.
+```{r}
+# percentage of missing data in each columns
+round(colSums(is.na(spotify)*100/nrow(spotify)),2)
+```
+```{r}
+#checking for duplicate rows
+count(spotify[duplicated(spotify[1:23]),])
+```
+
+From all the below codes we are making a subset of our data by selecting columns which are required for our classification model
+```{r}
+#counting the number of songs by genre
+spotify %>% count(playlist_genre)
+```
+
+```{r}
+#counting the number of songs by their popularity ranking.
+spotify %>% count(track_popularity)
+```
+
+A large number of songs are on the 0th position compared to other positions.
+
+```{r}
+numeric_features <-as.data.frame(spotify[,c(4,12:24)])
+```
+
+```{r}
+summary(numeric_features)
+```
+
+### Exploratory Data Analysis
+
+Basically we want to build a model that could predict popularity of a song inorder to predict that accurately its importact to closely study all the audio features and we have done that by below visualizating each feature individually
+```{r}
+#plotting the distribution of years of tracks
+dance1<-ggplot(spotify, aes(danceability)) + 
+  geom_histogram(bins = 20) +
+  ggtitle("Plot of Danceability Distribution") +
+  theme(plot.title = element_text(size = 11))
+
+#plotting the distribution of energy of tracks
+energy2<-ggplot(spotify, aes(energy)) + 
+  geom_histogram(bins = 20) +
+  ggtitle("Plot of energy Distribution") +
+  theme(plot.title = element_text(size = 11))
+
+#ploting the distribution of loudness of tracks
+loud3<-ggplot(spotify, aes(loudness)) + 
+  geom_histogram(bins = 20) +
+  ggtitle("Plot of loudness Distribution") +
+  theme(plot.title = element_text(size = 11))
+
+#plotting the speechness of years of tracks
+speech4 <- ggplot(spotify, aes(speechiness)) + 
+  geom_histogram(bins = 20) +
+  ggtitle("Plot of speechiness Distribution") +
+  theme(plot.title = element_text(size = 11))
+
+
+
+plot_grid(dance1, energy2, loud3,speech4, labels = "AUTO")
+```
+
+
+```{r}
+#plotting the liveness of years of tracks
+live5<-ggplot(spotify, aes(liveness)) + 
+  geom_histogram(bins = 20) +
+  ggtitle("Plot of liveness Distribution") +
+  theme(plot.title = element_text(size = 11))
+
+#plotting the instrumentalness of years of tracks
+instrument6<-ggplot(spotify, aes(instrumentalness)) + 
+  geom_histogram(bins = 20) +
+  ggtitle("Plot of instrumentalness Distribution") +
+  theme(plot.title = element_text(size = 11))
+
+#plotting the valence(positivity) of years of tracks
+valence7<-ggplot(spotify, aes(valence)) + 
+  geom_histogram(bins = 20) +
+  ggtitle("Plot of valence Distribution") +
+  theme(plot.title = element_text(size = 11))
+
+#plotting the tempo of years of tracks
+tempo8<-ggplot(spotify, aes(tempo)) + 
+  geom_histogram(bins = 20) +
+  ggtitle("Plot of tempo Distribution") +
+  theme(plot.title = element_text(size = 11))
+
+plot_grid(live5, instrument6, valence7,tempo8, labels = "AUTO")
+```
+
+```{r}
+#plotting the distribution of years of tracks
+ggplot(spotify, aes(track_year, fill=playlist_genre)) + 
+  geom_density(alpha = 0.3) + theme_bw() +
+  ggtitle("Plot of Track year Distribution") +
+  theme(plot.title = element_text(size = 11))
+```
+
+Rock originated somewhere around 1960s and rap around 1980s wheras pop and edm are more recent genres of music.
+
+```{r}
+#plotting the distribution of tempo of tracks
+ggplot(spotify, aes(tempo, fill=playlist_genre)) + 
+  geom_density(alpha = 0.3) + theme_bw() +
+  ggtitle("Plot of tempo Distribution") +
+  theme(plot.title = element_text(size = 11))
+```
+
+As expected tempo of edm songs are the highest.
+
+```{r}
+#plotting the popularity of tracks according to genre
+ggplot(spotify, aes(x=playlist_genre, y=track_popularity, fill=playlist_genre)) + 
+ geom_bar(stat="identity")
+  ggtitle("Plot of tempo Distribution") +
+  theme(plot.title = element_text(size = 11))
+```
+
+
+```{r}
+#plotting the distribution of tempo vs duration according to genre of tracks
+ggplot(spotify, aes(duration_ms, fill=playlist_genre)) + 
+ geom_density(alpha = 0.3) + theme_bw() +
+  ggtitle("Plot of tempo Distribution") +
+  theme(plot.title = element_text(size = 11))
+```
+```{r}
+ggplot(spotify, aes(x=loudness, y=track_popularity)) + 
+ geom_point(alpha = 0.3, color="blue") + theme_bw() +
+  ggtitle("Plot of tempo Distribution") +
+  theme(plot.title = element_text(size = 11))
+```
+
+
+From this chart we energy has high positive correlation with loudness
+```{r}
+pairs.panels(spotify[c("track_popularity","danceability","energy","key","loudness","mode", "speechiness",     "acousticness","instrumentalness","liveness","valence","tempo" )],hist.col = "green",gap=0)
+```
+
+### Modeling {.tabset}
+
+
+
+
+```{r}
+features <-as.data.frame(spotify[,c(4,10,12:24)])
+head(features)
+```
+
+#### Regression
+
+As discussed in our objective that we intendt to predict the track popularity of the spotify songs dataset and with tarck_popularity being a continuous variable, we applied linear regression to the model. 
+
+
+```{r}
+sample_size1=floor(0.7*nrow(features))
+set.seed(123)
+df_train1= sample(seq_len(nrow(features)),size = sample_size1)
+train1=features[df_train1,]
+test1=features[-df_train1,]
+spotify.lm<-lm(track_popularity ~.,data=train1)
+summary(spotify.lm)
+```
+
+What we witnessed here is despite most variables that were considered in the model were significant but the r square value of the model is extremely low. R square value tells us how accurately our dependent variable which is track_popularity in our model is explained by other independent variables. 
+
+An extremely low r square of our model signifies that linear regression is not an accurate approach for our problem statement.
+
+
+
+#### Classification
+
+##### **Logistic**
+
+Now after witnessing the drawback with linear regression we thought of applying logistic regression and predict the genre instead of track popularity. 
+
+In the below code we have just added a numeric genre_encode column with rap,rock and latin classified as '0' and r&b,edm and pop classified as '1'
+
+```{r}
+features[which(features$playlist_genre=='rap'|features$playlist_genre=='rock'|features$playlist_genre=='latin'),"genre_encode"] <- 0
+features[which(features$playlist_genre=='pop'|features$playlist_genre=='r&b'|features$playlist_genre=='edm'),"genre_encode"] <- 1
+features<-features[,-2]
+head(features)
+sample_size=floor(0.7*nrow(features))
+set.seed(123)
+df_train= sample(seq_len(nrow(features)),size = sample_size)
+train=features[df_train,]
+test=features[-df_train,]
+colnames(train)
+spotify.glm<-glm(genre_encode ~.,family ='binomial',data=train)
+pred.glm.test<- predict(spotify.glm, newdata = test, type="response")
+pred<-prediction(pred.glm.test,test$genre_encode)
+perf<-performance(pred,"tpr","fpr")
+plot(perf,colorize=TRUE)
+
+unlist(slot(performance(pred, "auc"), "y.values"))
+pcut1<- mean(train$genre_encode)
+pcut1
+predict.test <- predict(spotify.glm, newdata=test,type = "response")
+pred.test <- as.numeric(predict.test > pcut1)
+confusion_matrix_test <- table(test$genre_encode, pred.test,dnn=c("True","Predicted"))
+confusion_matrix_test
+misclassification_rate_test <-round((confusion_matrix_test[2]+confusion_matrix_test[3])/sum(confusion_matrix_test), 2)
+misclassification_rate_test
+```
+
+After running the above set of codes we have received an accuracy of 63%.
+
+##### **Decision Tree**
+
+
+```{r}
+spotify.rpart<- rpart(formula = genre_encode ~ ., data = train, method = "class")
+spotify.rpart
+
+spotify.train.pred.tree1<- predict(spotify.rpart, type="class")
+table(train$genre_encode, spotify.train.pred.tree1, dnn = c("True", "Pred"))
+
+prp(spotify.rpart, extra = 1)
+
+spotify.test.pred.tree1<- predict(spotify.rpart, test, type="class")
+table(test$genre_encode, spotify.test.pred.tree1, dnn=c("Truth","Predicted"))
+
+cost <- function(r, pi){
+  weight1 = 1
+  weight0 = 1
+  c1 = (r==1)&(pi==0) #logical vector - true if actual 1 but predict 0
+  c0 = (r==0)&(pi==1) #logical vector - true if actual 0 but predict 1
+  return(mean(weight1*c1+weight0*c0))
+}
+cost(train$genre_encode,spotify.train.pred.tree1)
+
+cost(test$genre_encode,spotify.test.pred.tree1)
+
+```
+
+After running the above set of codes we have received an accuracy of 64%.
+
+
+ 
+
+### Summary
+
+* The whole approach of our project was to predict track_popularity. But gradually after closely understanding the data through Exploratory Data Analysis and running regression which is one of the modeling techniques we realized that track_popularity is too difficult to predict as the linear relationship between dependent and independent variables is not accurately explained. 
+
+* Also from the API documentation of Spotify which can be found [here](https://developer.spotify.com/documentation/web-api/reference/tracks/get-track/) it indicates that track_popularity is calculated by the total number of plays and how recent those plays were. So after doing quick secondary research, we have witnessed that the linear regression approach is not an accurate approach for our problem statement and hence we switched to logistic regression.
+
+* In this approach we classified song_genre into two classes; with rap, rock and latin in class '0' and r&b,edm and pop in class '1'. So now the objective of predicting the class of song_genre was achieved with an accuracy of 63%, the same appraoch was further verified by applying decision tree apprach which resulted in improving accuracy by 1% i.e at 64%
+
